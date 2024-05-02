@@ -56,12 +56,16 @@ export default siteConfig({
   navigationStyle: 'custom',
   navigationLinks: [
     {
-      title: 'Blog',
-      pageId: 'c904ce4474ca449c80bec7a5fcc02883'
+      title: 'About',
+      pageId: '935e6b40097c4acfa89387d398bcf3ab'
     },
     {
-      title: 'Contact',
-      pageId: 'c36b1ee49dbb49579004a7e61dd0f703'
+      title: 'Resume',
+      pageId: '9692b1ae5b344a9cb099251bdd3381ab'
+    },
+    {
+      title: 'Blog',
+      pageId: 'c904ce4474ca449c80bec7a5fcc02883'
     }
   ]
 })
