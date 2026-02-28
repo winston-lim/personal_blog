@@ -2,10 +2,9 @@ import * as React from 'react'
 import dynamic from 'next/dynamic'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useRouter } from 'next/router'
 
 import cs from 'classnames'
-import { PageBlock } from 'notion-types'
+import { Block as NotionBlock, PageBlock } from 'notion-types'
 import {
   formatDate,
   getBlockTitle,
@@ -25,7 +24,6 @@ import { getCanonicalPageUrl, mapPageUrl } from '@/lib/map-page-url'
 import { useDarkMode } from '@/lib/use-dark-mode'
 
 import { Footer } from './Footer'
-import { Loading } from './Loading'
 import { NotionPageHeader } from './NotionPageHeader'
 import { Page404 } from './Page404'
 import { PageAside } from './PageAside'
@@ -146,7 +144,7 @@ const propertySelectValue = (
   if (pageHeader && schema.type === 'multi_select' && value) {
     return (
       <Link href={`/tags/${value}`} key={key}>
-        <a>{defaultFn()}</a>
+        {defaultFn()}
       </Link>
     )
   }
@@ -159,6 +157,22 @@ const HeroHeader = dynamic<{ className?: string }>(
   { ssr: false }
 )
 
+const NextLinkAdapter = ({
+  href,
+  as,
+  children,
+  ...anchorProps
+}: React.PropsWithChildren<{
+  href: string
+  as?: string
+} & React.AnchorHTMLAttributes<HTMLAnchorElement>>) => {
+  return (
+    <Link href={href} as={as} passHref legacyBehavior>
+      <a {...anchorProps}>{children}</a>
+    </Link>
+  )
+}
+
 export const NotionPage: React.FC<types.PageProps> = ({
   site,
   recordMap,
@@ -167,13 +181,67 @@ export const NotionPage: React.FC<types.PageProps> = ({
   tagsPage,
   propertyToFilterName
 }) => {
-  const router = useRouter()
   const lite = useSearchParam('lite')
+  const [hasMounted, setHasMounted] = React.useState(false)
+
+  // Some Notion payloads may contain blocks without IDs. Instead of dropping
+  // these blocks (which can hide collection content), normalize them by
+  // backfilling IDs from block keys.
+  const safeRecordMap = React.useMemo(() => {
+    if (!recordMap?.block) {
+      return recordMap
+    }
+
+    const block = Object.fromEntries(
+      Object.entries(recordMap.block).map(([blockId, blockEntry]) => {
+        if (!blockEntry || typeof blockEntry !== 'object') {
+          return [blockId, blockEntry]
+        }
+
+        if ('value' in blockEntry) {
+          const value = (blockEntry as { value?: NotionBlock }).value
+
+          if (value && typeof value === 'object' && !value.id) {
+            return [
+              blockId,
+              {
+                ...(blockEntry as { value?: NotionBlock }),
+                value: {
+                  ...value,
+                  id: blockId
+                }
+              }
+            ]
+          }
+
+          return [blockId, blockEntry]
+        }
+
+        const value = blockEntry as NotionBlock
+        if (value && typeof value === 'object' && !value.id) {
+          return [
+            blockId,
+            {
+              ...value,
+              id: blockId
+            }
+          ]
+        }
+
+        return [blockId, blockEntry]
+      })
+    ) as typeof recordMap.block
+
+    return {
+      ...recordMap,
+      block
+    }
+  }, [recordMap])
 
   const components = React.useMemo(
     () => ({
       nextImage: Image,
-      nextLink: Link,
+      nextLink: NextLinkAdapter,
       Code,
       Collection,
       Modal,
@@ -191,17 +259,36 @@ export const NotionPage: React.FC<types.PageProps> = ({
   const isLiteMode = lite === 'true'
 
   const { isDarkMode } = useDarkMode()
+  const effectiveDarkMode = hasMounted ? isDarkMode : false
+
+  React.useEffect(() => {
+    setHasMounted(true)
+  }, [])
 
   const siteMapPageUrl = React.useMemo(() => {
     const params: any = {}
     if (lite) params.lite = lite
 
     const searchParams = new URLSearchParams(params)
-    return mapPageUrl(site, recordMap, searchParams)
-  }, [site, recordMap, lite])
+    return mapPageUrl(site, safeRecordMap, searchParams)
+  }, [site, safeRecordMap, lite])
 
-  const keys = Object.keys(recordMap?.block || {})
-  const block = recordMap?.block?.[keys[0]]?.value
+  const keys = Object.keys(safeRecordMap?.block || {})
+  const resolvedPageId = parsePageId(pageId, { uuid: true }) || undefined
+  const selectedBlockEntry =
+    (resolvedPageId
+      ? safeRecordMap?.block?.[resolvedPageId]
+      : undefined) ?? safeRecordMap?.block?.[keys[0]]
+  const firstBlockEntry = selectedBlockEntry as
+    | { value?: NotionBlock }
+    | NotionBlock
+    | undefined
+  const block =
+    firstBlockEntry &&
+    typeof firstBlockEntry === 'object' &&
+    'value' in firstBlockEntry
+      ? firstBlockEntry.value
+      : (firstBlockEntry as NotionBlock | undefined)
 
   // const isRootPage =
   //   parsePageId(block?.id) === parsePageId(site?.rootNotionPageId)
@@ -215,9 +302,13 @@ export const NotionPage: React.FC<types.PageProps> = ({
 
   const pageAside = React.useMemo(
     () => (
-      <PageAside block={block} recordMap={recordMap} isBlogPost={isBlogPost} />
+      <PageAside
+        block={block}
+        recordMap={safeRecordMap}
+        isBlogPost={isBlogPost}
+      />
     ),
-    [block, recordMap, isBlogPost]
+    [block, safeRecordMap, isBlogPost]
   )
 
   const footer = React.useMemo(() => <Footer />, [])
@@ -232,15 +323,11 @@ export const NotionPage: React.FC<types.PageProps> = ({
     }
   }, [isBioPage])
 
-  if (router.isFallback) {
-    return <Loading />
-  }
-
   if (error || !site || !block) {
     return <Page404 site={site} pageId={pageId} error={error} />
   }
 
-  const name = getBlockTitle(block, recordMap) || site.name
+  const name = getBlockTitle(block, safeRecordMap) || site.name
   const title =
     tagsPage && propertyToFilterName ? `${propertyToFilterName} ${name}` : name
 
@@ -261,18 +348,19 @@ export const NotionPage: React.FC<types.PageProps> = ({
   }
 
   const canonicalPageUrl =
-    !config.isDev && getCanonicalPageUrl(site, recordMap)(pageId)
+    !config.isDev && getCanonicalPageUrl(site, safeRecordMap)(pageId)
 
   const socialImage = mapImageUrl(
-    getPageProperty<string>('Social Image', block, recordMap) ||
+    getPageProperty<string>('Social Image', block, safeRecordMap) ||
       (block as PageBlock).format?.page_cover ||
       config.defaultPageCover,
     block
   )
 
   const socialDescription =
-    getPageProperty<string>('Description', block, recordMap) ||
+    getPageProperty<string>('Description', block, safeRecordMap) ||
     config.description
+  const isDevHydrationPass = process.env.NODE_ENV !== 'production' && !hasMounted
 
   return (
     <>
@@ -286,36 +374,46 @@ export const NotionPage: React.FC<types.PageProps> = ({
       />
 
       {isLiteMode && <BodyClassName className='notion-lite' />}
-      {isDarkMode && <BodyClassName className='dark-mode' />}
+      {hasMounted && isDarkMode && <BodyClassName className='dark-mode' />}
 
-      <NotionRenderer
-        bodyClassName={cs(
-          styles.notion,
-          pageId === site.rootNotionPageId && 'index-page',
-          tagsPage && 'tags-page'
-        )}
-        darkMode={isDarkMode}
-        components={components}
-        recordMap={recordMap}
-        rootPageId={site.rootNotionPageId}
-        rootDomain={site.domain}
-        fullPage={!isLiteMode}
-        previewImages={!!recordMap.preview_images}
-        showCollectionViewDropdown={false}
-        showTableOfContents={showTableOfContents}
-        minTableOfContentsItems={minTableOfContentsItems}
-        defaultPageIcon={config.defaultPageIcon}
-        defaultPageCover={config.defaultPageCover}
-        defaultPageCoverPosition={config.defaultPageCoverPosition}
-        linkTableTitleProperties={false}
-        mapPageUrl={siteMapPageUrl}
-        mapImageUrl={mapImageUrl}
-        searchNotion={null}
-        pageAside={pageAside}
-        footer={footer}
-        pageTitle={tagsPage && propertyToFilterName ? title : undefined}
-        pageCover={pageCover}
-      />
+      {isDevHydrationPass ? (
+        <div
+          className={cs(
+            styles.notion,
+            pageId === site.rootNotionPageId && 'index-page',
+            tagsPage && 'tags-page'
+          )}
+        />
+      ) : (
+        <NotionRenderer
+          bodyClassName={cs(
+            styles.notion,
+            pageId === site.rootNotionPageId && 'index-page',
+            tagsPage && 'tags-page'
+          )}
+          darkMode={effectiveDarkMode}
+          components={components}
+          recordMap={safeRecordMap}
+          rootPageId={site.rootNotionPageId}
+          rootDomain={site.domain}
+          fullPage={!isLiteMode}
+          previewImages={!!safeRecordMap.preview_images}
+          showCollectionViewDropdown={false}
+          showTableOfContents={showTableOfContents}
+          minTableOfContentsItems={minTableOfContentsItems}
+          defaultPageIcon={config.defaultPageIcon}
+          defaultPageCover={config.defaultPageCover}
+          defaultPageCoverPosition={config.defaultPageCoverPosition}
+          linkTableTitleProperties={false}
+          mapPageUrl={siteMapPageUrl}
+          mapImageUrl={mapImageUrl}
+          searchNotion={null}
+          pageAside={pageAside}
+          footer={footer}
+          pageTitle={tagsPage && propertyToFilterName ? title : undefined}
+          pageCover={pageCover}
+        />
+      )}
     </>
   )
 }

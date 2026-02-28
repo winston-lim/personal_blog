@@ -5,6 +5,18 @@ export async function pageAcl({
   recordMap,
   pageId
 }: PageProps): Promise<PageProps> {
+  const unwrapBlock = (blockEntry: unknown) => {
+    if (!blockEntry || typeof blockEntry !== 'object') {
+      return null
+    }
+
+    if ('value' in blockEntry) {
+      return (blockEntry as { value?: { space_id?: string } }).value ?? null
+    }
+
+    return blockEntry as { space_id?: string }
+  }
+
   if (!site) {
     return {
       error: {
@@ -35,7 +47,7 @@ export async function pageAcl({
     }
   }
 
-  const rootValue = recordMap.block[rootKey]?.value
+  const rootValue = unwrapBlock(recordMap.block[rootKey])
   const rootSpaceId = rootValue?.space_id
 
   if (
@@ -51,5 +63,11 @@ export async function pageAcl({
         }
       }
     }
+  }
+
+  return {
+    site,
+    recordMap,
+    pageId
   }
 }

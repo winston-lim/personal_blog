@@ -28,7 +28,16 @@ export default async (req: NextApiRequest, res: NextApiResponse) => {
   const recordMap = await notion.getPage(pageId)
 
   const keys = Object.keys(recordMap?.block || {})
-  const block = recordMap?.block?.[keys[0]]?.value
+  const firstBlockEntry = recordMap?.block?.[keys[0]] as
+    | { value?: PageBlock }
+    | PageBlock
+    | undefined
+  const block =
+    firstBlockEntry &&
+    typeof firstBlockEntry === 'object' &&
+    'value' in firstBlockEntry
+      ? firstBlockEntry.value
+      : (firstBlockEntry as PageBlock | undefined)
 
   if (!block) {
     throw new Error('Invalid recordMap for page')

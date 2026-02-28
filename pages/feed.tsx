@@ -1,6 +1,6 @@
 import type { GetServerSideProps } from 'next'
 
-import { ExtendedRecordMap } from 'notion-types'
+import { Block, ExtendedRecordMap } from 'notion-types'
 import {
   getBlockParentPage,
   getBlockTitle,
@@ -15,6 +15,18 @@ import { getSocialImageUrl } from '@/lib/get-social-image-url'
 import { getCanonicalPageUrl } from '@/lib/map-page-url'
 
 export const getServerSideProps: GetServerSideProps = async ({ req, res }) => {
+  const unwrapBlock = (blockEntry: unknown): Block | null => {
+    if (!blockEntry || typeof blockEntry !== 'object') {
+      return null
+    }
+
+    if ('value' in blockEntry) {
+      return ((blockEntry as { value?: Block }).value ?? null) as Block | null
+    }
+
+    return blockEntry as Block
+  }
+
   if (req.method !== 'GET') {
     res.statusCode = 405
     res.setHeader('Content-Type', 'application/json')
@@ -41,7 +53,7 @@ export const getServerSideProps: GetServerSideProps = async ({ req, res }) => {
     if (!recordMap) continue
 
     const keys = Object.keys(recordMap?.block || {})
-    const block = recordMap?.block?.[keys[0]]?.value
+    const block = unwrapBlock(recordMap?.block?.[keys[0]])
     if (!block) continue
 
     const parentPage = getBlockParentPage(block, recordMap)
@@ -67,8 +79,8 @@ export const getServerSideProps: GetServerSideProps = async ({ req, res }) => {
     const date = lastUpdatedTime
       ? new Date(lastUpdatedTime)
       : publishedTime
-      ? new Date(publishedTime)
-      : undefined
+        ? new Date(publishedTime)
+        : undefined
     const socialImageUrl = getSocialImageUrl(pageId)
 
     feed.item({

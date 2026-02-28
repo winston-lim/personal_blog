@@ -26,8 +26,15 @@ export const oembed = async ({
   const pageTitle = getPageTitle(page)
   if (pageTitle) title = pageTitle
 
-  const user = page.notion_user[Object.keys(page.notion_user)[0]]?.value
-  const name = [user.given_name, user.family_name]
+  const firstUserEntry = page.notion_user[Object.keys(page.notion_user)[0]]
+  const user = (
+    firstUserEntry &&
+    typeof firstUserEntry === 'object' &&
+    'value' in firstUserEntry
+      ? firstUserEntry.value
+      : firstUserEntry
+  ) as any
+  const name = [user?.given_name, user?.family_name]
     .filter(Boolean)
     .join(' ')
     .trim()
