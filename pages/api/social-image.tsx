@@ -1,10 +1,15 @@
 import * as React from 'react'
-import { NextRequest } from 'next/server'
 
 import { ImageResponse } from '@vercel/og'
 
-import { api, apiHost, rootNotionPageId } from '@/lib/config'
-import { NotionPageInfo } from '@/lib/types'
+import siteConfig from '../../site.config'
+
+interface SocialImagePageInfo {
+  title: string
+  image?: string | null
+  authorImage?: string | null
+  detail?: string | null
+}
 
 const interRegularFontP = fetch(
   new URL('../../public/fonts/Inter-Regular.ttf', import.meta.url)
@@ -15,17 +20,18 @@ const interBoldFontP = fetch(
 ).then((res) => res.arrayBuffer())
 
 export const config = {
-  runtime: 'experimental-edge'
+  runtime: 'edge'
 }
 
-export default async function OGImage(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const pageId = searchParams.get('id') || rootNotionPageId
+export default async function OGImage(req: Request) {
+  const url = new URL(req.url)
+  const { searchParams } = url
+  const pageId = searchParams.get('id') || siteConfig.rootNotionPageId
   if (!pageId) {
     return new Response('Invalid notion page id', { status: 400 })
   }
 
-  const pageInfoRes = await fetch(`${apiHost}${api.getNotionPageInfo}`, {
+  const pageInfoRes = await fetch(`${url.origin}/api/notion-page-info`, {
     method: 'POST',
     body: JSON.stringify({ pageId }),
     headers: {
@@ -35,7 +41,7 @@ export default async function OGImage(req: NextRequest) {
   if (!pageInfoRes.ok) {
     return new Response(pageInfoRes.statusText, { status: pageInfoRes.status })
   }
-  const pageInfo: NotionPageInfo = await pageInfoRes.json()
+  const pageInfo: SocialImagePageInfo = await pageInfoRes.json()
   console.log(pageInfo)
 
   const [interRegularFont, interBoldFont] = await Promise.all([
